@@ -40,6 +40,7 @@ jobs:
 
       # Apple checks the app and issues a ticket; stapling it to the DesktopCat.dmg lets it open without warnings, even offline.
       - name: Notarize with Apple
+        timeout-minutes: 45   # Apple usually answers in minutes; don't let a stuck request hang for hours
         env:
           NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
