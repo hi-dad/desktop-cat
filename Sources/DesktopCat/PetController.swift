@@ -325,6 +325,7 @@ final class PetController {
     }
 
     func setEnergy(_ energy: Energy) {
+        if settings.paused { setPaused(false) } // Picking a new energy wakes him up.
         settings.energy = energy
         applyTuning()
     }

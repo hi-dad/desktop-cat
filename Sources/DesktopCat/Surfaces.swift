@@ -68,6 +68,13 @@ enum WindowGeometry {
     }
 
     /// True when some window fills the whole screen (a full-screen app or video).
+    /// Tucked behind window `id`, the cat is behind every window in front of it too (`windows` is front
+    /// to back). True when one of those covers `rect`: it would vanish there instead of behind `id`.
+    static func coveredInFront(of id: Int, _ rect: CGRect, windows: [WindowRect]) -> Bool {
+        guard let i = windows.firstIndex(where: { $0.id == id }) else { return true }
+        return windows[..<i].contains { $0.frame.intersects(rect) }
+    }
+
     static func hasFullScreenWindow(_ windows: [WindowRect], screenFrame: CGRect) -> Bool {
         windows.contains {
             abs($0.frame.minX - screenFrame.minX) < 2 && abs($0.frame.minY - screenFrame.minY) < 2 &&

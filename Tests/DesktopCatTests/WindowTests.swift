@@ -26,6 +26,17 @@ import Testing
         #expect(l.count == 1 && l[0].width == 800)
     }
 
+    @Test func onlyWindowsInFrontCanHideTheCatsPathBehindAnother() {
+        let front = WindowRect(id: 1, frame: CGRect(x: 0, y: 0, width: 500, height: 600))     // e.g. a white page in front
+        let back = WindowRect(id: 2, frame: CGRect(x: 400, y: 0, width: 800, height: 500))
+        let behind = WindowRect(id: 3, frame: CGRect(x: 1000, y: 0, width: 400, height: 400))
+        let ws = [front, back, behind]
+        // Walking behind window 2 through x 420–560: window 1 is in front there, so he'd vanish.
+        #expect(WindowGeometry.coveredInFront(of: 2, CGRect(x: 420, y: 0, width: 140, height: 144), windows: ws))
+        // Further right only window 3 overlaps, and it's behind window 2: fine.
+        #expect(!WindowGeometry.coveredInFront(of: 2, CGRect(x: 900, y: 0, width: 200, height: 144), windows: ws))
+    }
+
     @Test func noLedgeWhereTheCatWouldNotFit() {
         let tall = WindowRect(id: 1, frame: CGRect(x: 0, y: 0, width: 800, height: 950))     // top too close to the menu bar
         let narrow = WindowRect(id: 2, frame: CGRect(x: 900, y: 100, width: 150, height: 300)) // narrower than 1.2 cats

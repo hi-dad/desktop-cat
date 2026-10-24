@@ -11,14 +11,17 @@ enum Energy: String, CaseIterable {
         switch self {
         case .calm:
             t.idleSeconds = 12...25
-            t.weights = .init(idle: 50, walk: 15, groom: 12, rest: 15, look: 14, paw: 4)
+            // Asleep in a corner about 40% of the time: naps come often and run long.
+            t.weights = .init(idle: 50, walk: 15, groom: 12, rest: 25, look: 14, paw: 7)
             t.chanceRun = 0
-            t.chanceNapAfterYawn = 0.5
+            t.chanceNapAfterYawn = 0.9
+            t.napSeconds = 120...300
+            t.stayOnSides = true
         case .normal:
             break
         case .lively:
             t.idleSeconds = 5...12
-            t.weights = .init(idle: 30, walk: 40, groom: 10, rest: 5, look: 20, paw: 9)
+            t.weights = .init(idle: 30, walk: 40, groom: 10, rest: 5, look: 20, paw: 14)
             t.chanceRun = 0.3
             t.chanceNapAfterYawn = 0.15
         }
@@ -31,7 +34,7 @@ struct BrainTuning {
     struct Weights {
         var idle = 45.0, walk = 25.0, groom = 10.0, rest = 10.0, look = 16.0
         /// Standing up on its hind legs and pawing at the screen (the beg frames).
-        var paw = 6.0
+        var paw = 10.0
         /// Only counts while a need is low: begging, looking sad or bored.
         var needs = 25.0
         /// Only counts while an opt-in extra (windows) is switched on.
@@ -52,6 +55,8 @@ struct BrainTuning {
     var sitBackSeconds: ClosedRange<Double> = 4...8
     var chanceNapAfterYawn = 0.3
     var napSeconds: ClosedRange<Double> = 60...180
+    /// Calm: keep strictly to the outer thirds and nap in a corner, well out of the way.
+    var stayOnSides = false
     var chanceStretchAfterWaking = 0.6
     /// When you haven't touched the mouse or keyboard for this long, the cat goes to sleep.
     var sleepWhenAwaySeconds: ClosedRange<Double> = 180...480
@@ -628,36 +633,68 @@ final class Brain {
     private func pickTarget(minDistance: Double) {
         let span = floorRange.upperBound - floorRange.lowerBound
         guard span > minDistance else { targetX = floorRange.lowerBound; return }
-        // On a wide floor, usually head for one of the sides, out of the way; now and then anywhere.
-        let preferSides = span > spriteWidth * 6 && chance(0.75)
-        let band = span * 0.22
         var t = x
-        for _ in 0..<10 {
-            if preferSides {
-                let left = chance(0.5)
-                t = left ? floorRange.lowerBound + Double.random(in: 0...band, using: &rng)
-                         : floorRange.upperBound - Double.random(in: 0...band, using: &rng)
-            } else {
+        guard span > spriteWidth * 6 else {
+            for _ in 0..<10 {
                 t = Double.random(in: floorRange, using: &rng)
+                if abs(t - x) >= minDistance { break }
             }
-            if abs(t - x) >= minDistance { break }
+            targetX = t
+            return
         }
-        targetX = t
+        guard tuning.stayOnSides else {
+            // Usually head for one of the sides, out of the way; now and then anywhere.
+            let preferSides = chance(0.75)
+            let band = span * 0.22
+            for _ in 0..<10 {
+                if preferSides {
+                    t = chance(0.5) ? floorRange.lowerBound + Double.random(in: 0...band, using: &rng)
+                                    : floorRange.upperBound - Double.random(in: 0...band, using: &rng)
+                } else {
+                    t = Double.random(in: floorRange, using: &rng)
+                }
+                if abs(t - x) >= minDistance { break }
+            }
+            targetX = t
+            return
+        }
+        // Calm, out of the way: walks end in the outer third on either side, never mid-screen. Mostly
+        // it potters about on the side it's on; now and then it walks right across to the other side.
+        let third = span / 3
+        let onLeft = x < (floorRange.lowerBound + floorRange.upperBound) / 2
+        func spot(left: Bool) -> Double {
+            left ? floorRange.lowerBound + Double.random(in: 0...third, using: &rng)
+                 : floorRange.upperBound - Double.random(in: 0...third, using: &rng)
+        }
+        if inMiddle { targetX = spot(left: onLeft); return }
+        if !chance(0.3) {
+            for _ in 0..<10 {
+                t = spot(left: onLeft)
+                if abs(t - x) >= minDistance { targetX = t; return }
+            }
+        }
+        targetX = spot(left: !onLeft)
     }
 
-    /// In the middle half of a wide floor, where sitting still gets in the way.
+    /// Mid-screen on a wide floor, where sitting still gets in the way (the middle half; Calm: the middle third).
     private var inMiddle: Bool {
         let span = floorRange.upperBound - floorRange.lowerBound
         guard span > spriteWidth * 6 else { return false }
         let k = (x - floorRange.lowerBound) / span
-        return k > 0.25 && k < 0.75
+        return tuning.stayOnSides ? k > 1 / 3 && k < 2 / 3 : k > 0.25 && k < 0.75
     }
 
-    /// Somewhere near the nearer side of the screen to curl up, or nil when it's already out of the way.
+    /// Somewhere near the nearer side to curl up (Calm: in the corner), or nil when it's already out of the way.
     var sideSpotForRest: Double? {
-        guard inMiddle else { return nil }
-        let band = (floorRange.upperBound - floorRange.lowerBound) * 0.18
+        let span = floorRange.upperBound - floorRange.lowerBound
+        guard span > spriteWidth * 6 else { return nil }
+        let band = span * (tuning.stayOnSides ? 0.12 : 0.18)
         let mid = (floorRange.lowerBound + floorRange.upperBound) / 2
+        if tuning.stayOnSides {
+            if x - floorRange.lowerBound <= band || floorRange.upperBound - x <= band { return nil }
+        } else if !inMiddle {
+            return nil
+        }
         return x < mid ? floorRange.lowerBound + Double.random(in: 0...band, using: &rng)
                        : floorRange.upperBound - Double.random(in: 0...band, using: &rng)
     }

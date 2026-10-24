@@ -58,11 +58,13 @@ final class ExtrasController {
     private var selfStarts: [TimeInterval] = []
     private var lowAndMovingFor = 0.0
 
-    /// He starts at most 2 games of his own every 5 minutes. Once you play back, the game isn't capped.
+    /// He starts at most 2 games of his own every 5 minutes (Calm: 1 every 10). Once you play back,
+    /// the game isn't capped (except in Calm, where one pounce is enough).
+    private var calm: Bool { pet.settings.energy == .calm }
     private var mayStartOnHisOwn: Bool {
         let now = ProcessInfo.processInfo.systemUptime
-        selfStarts.removeAll { now - $0 > 300 }
-        return selfStarts.count < 2
+        selfStarts.removeAll { now - $0 > (calm ? 600 : 300) }
+        return selfStarts.count < (calm ? 1 : 2)
     }
     private func noteSelfStart() { selfStarts.append(ProcessInfo.processInfo.systemUptime) }
 
@@ -88,7 +90,9 @@ final class ExtrasController {
             if onLedge {
                 if pet.readyToLeaveLedge { plans.append { self.planGetDown() } }
             } else {
-                // Up on a window is the favourite spot: usually head for one when there is one.
+                // Scratching at a window's side is a favourite; so is getting up on top of one.
+                if (pet.settings.jumpOnWindows || pet.settings.peekBehindWindows) && Double.random(in: 0..<1) < 0.4,
+                   let s = planBatEdge() { run(s); return true }
                 if Double.random(in: 0..<1) < 0.75, let s = planClimbUp() { run(s); return true }
                 plans.append(planClimbUp)
             }
@@ -186,6 +190,20 @@ final class ExtrasController {
     private var screen: CGRect { pet.currentScreen().visibleFrame }
     private var maxJump: Double { catH * 1.6 }
 
+    private func coveredInFront(of id: Int, _ rect: CGRect) -> Bool {
+        WindowGeometry.coveredInFront(of: id, rect, windows: pet.windows)
+    }
+
+    /// The floor between two cat positions, a cat high.
+    private func floorStrip(_ a: Double, _ b: Double) -> CGRect {
+        CGRect(x: min(a, b), y: Double(screen.minY), width: abs(b - a) + catW, height: catH)
+    }
+
+    /// Just under and over a window's top edge, where the cat peeks out.
+    private func peekStrip(x: Double, top: CGFloat) -> CGRect {
+        CGRect(x: x, y: Double(top) - catH, width: catW, height: catH * 2)
+    }
+
     /// Up onto a window from behind it: slip round the side and behind it, peek over the top,
     /// duck back down, then spring up from behind and land on top.
     private func planClimbUp() -> [Step]? {
@@ -200,6 +218,7 @@ final class ExtrasController {
             let lo = max(top.minX, Double(f.minX)) + catW * 0.2, hi = min(top.maxX, Double(f.maxX)) - catW * 1.2
             guard lo <= hi else { continue }
             let x = Double.random(in: lo...hi)
+            guard !coveredInFront(of: w.id, floorStrip(sideX, x)), !coveredInFront(of: w.id, peekStrip(x: x, top: f.maxY)) else { continue }
             let hiddenY = Double(f.maxY) - frameH * scale - 2 * scale
             let range = top.catRange(catWidth: catW)
             let landing = min(max(x + (Bool.random() ? 1 : -1) * catW * 0.3, range.lowerBound), range.upperBound)
@@ -222,7 +241,7 @@ final class ExtrasController {
            Double(f.minY) <= floorY + catH * 0.5, let outX = sideOutside(f) {
             let range = l.catRange(catWidth: catW)
             let lo = max(range.lowerBound, Double(f.minX)), hi = min(range.upperBound, Double(f.maxX) - catW)
-            if lo <= hi {
+            if lo <= hi, !coveredInFront(of: id, floorStrip(min(max(brain.x, lo), hi), outX)) {
                 let x = min(max(brain.x, lo), hi)
                 involvedWindow = id
                 return [.hideBehind(windowID: id), .leap(toX: x, toY: floorY, onto: .floor),
@@ -290,7 +309,8 @@ final class ExtrasController {
             // Out the nearer side afterwards.
             let outLeft = x - Double(f.minX) < Double(f.maxX) - x
             let outX = outLeft ? Double(f.minX) - catW - 2 : Double(f.maxX) + 2
-            guard outX >= Double(screen.minX), outX + catW <= Double(screen.maxX) else { continue }
+            guard outX >= Double(screen.minX), outX + catW <= Double(screen.maxX),
+                  !coveredInFront(of: w.id, floorStrip(x, outX)), !coveredInFront(of: w.id, peekStrip(x: x, top: f.maxY)) else { continue }
             involvedWindow = w.id
             return [.walk(toX: x, run: false), .hideBehind(windowID: w.id), .place(x: x, y: hiddenY),
                     .start("peek"), .slide(toY: peekY, seconds: 0.4), .wait(Double.random(in: 3...5)),
@@ -335,6 +355,7 @@ final class ExtrasController {
             guard outside >= floor.lowerBound, outside <= floor.upperBound else { continue }
             let poke = catW * 0.33 // Head and paw peek out past the edge.
             let x = leftEdge ? edge - poke - (w - 1 - reach) * scale : edge + poke - (reach + 1) * scale
+            guard !coveredInFront(of: win.id, floorStrip(outside, x)) else { continue }
             involvedWindow = win.id
             return [.walk(toX: outside, run: false), .hideBehind(windowID: win.id), .walk(toX: x, run: false),
                     .face(right: !leftEdge)] + bats + [.walk(toX: outside, run: false), .comeForward]
@@ -534,12 +555,12 @@ final class ExtrasController {
         case let .watchForPlay(seconds):
             let mouse = NSEvent.mouseLocation
             let nearby = abs(Double(mouse.x) - (brain.x + catW / 2)) < catW * 4 && Double(mouse.y) < pet.y + catH * 3
-            if lastMouseMoved > watchStarted && nearby && !userBusy {
+            if lastMouseMoved > watchStarted && nearby && !userBusy && !calm {
                 // You moved the pointer near him again: you're playing. Game on.
                 steps = pet.settings.chaseCursor ? [.chase] : []
                 return true
             }
-            if t >= seconds || userBusy {
+            if t >= seconds || userBusy || calm {
                 // You didn't: he loses interest, has a wash, and leaves the pointer alone for a while.
                 steps = [.playOnce("groom")]
                 chaseCooldown = Double.random(in: 45...90)

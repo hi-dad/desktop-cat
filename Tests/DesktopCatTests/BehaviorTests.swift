@@ -124,6 +124,47 @@ final class Sim {
         #expect(Double(sides.count) / Double(stops.count) > 0.65)
     }
 
+    @Test func calmWalksAlwaysEndInTheOuterThirds() {
+        let sim = Sim(seed: 3, energy: .calm)
+        sim.brain.tuning.weights = .init(idle: 0, walk: 1, groom: 0, rest: 0, look: 0)
+        sim.brain.tuning.chanceRun = 0
+        var stops: [Double] = []
+        var last = sim.engine.currentID
+        sim.run(seconds: 1200) { _ in
+            if last == "walk" && sim.engine.currentID == "idle_sit" { stops.append(sim.brain.x) }
+            last = sim.engine.currentID
+        }
+        let r = sim.brain.floorRange, span = r.upperBound - r.lowerBound
+        let sides = stops.filter { abs($0 - r.lowerBound) <= span / 3 || abs($0 - r.upperBound) <= span / 3 }
+        #expect(stops.count > 20)
+        #expect(sides.count == stops.count, "stopped mid-screen")
+        // Mostly pottering about on one side, sometimes crossing over.
+        let crossings = zip(stops, stops.dropFirst()).filter { ($0 < 600) != ($1 < 600) }.count
+        #expect(crossings > 0 && Double(crossings) / Double(stops.count) < 0.5)
+    }
+
+    @Test func calmSleepsInACornerAboutFortyPercentOfTheTime() {
+        var total = 0.0, asleep = 0.0, cornerNaps = 0, naps = 0
+        for seed in UInt64(1)...4 {
+            let sim = Sim(seed: seed, energy: .calm)
+            sim.brain.userIdleSeconds = 0.5 // You're at the Mac the whole time.
+            var last = sim.engine.currentID
+            sim.run(seconds: 3 * 3600) { _ in
+                let id = sim.engine.currentID
+                total += 1.0 / 30
+                if id == "sleep" { asleep += 1.0 / 30 }
+                if id == "lie_down" && last != "lie_down" {
+                    naps += 1
+                    if sim.brain.x < 150 || sim.brain.x > 1050 { cornerNaps += 1 }
+                }
+                last = id
+            }
+        }
+        let share = asleep / total
+        #expect(share > 0.3 && share < 0.5, "asleep \(Int(share * 100))% of the time")
+        #expect(naps > 10 && cornerNaps == naps)
+    }
+
     @Test func goesToASideBeforeFallingAsleep() {
         for seed in UInt64(1)...5 {
             let sim = Sim(seed: seed)
