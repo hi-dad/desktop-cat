@@ -69,6 +69,19 @@ final class SpriteView: NSView {
     override func mouseDragged(with event: NSEvent) { onMouseDragged?(event) }
     override func mouseUp(with event: NSEvent) { onMouseUp?(event) }
 
+    private let clipMask = CALayer()
+
+    /// Only show this part of the view (in view coordinates), or everything when nil.
+    func clip(to rect: NSRect?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let rect else { layer?.mask = nil; return }
+        clipMask.backgroundColor = NSColor.black.cgColor
+        clipMask.frame = rect.isNull ? .zero : rect
+        if layer?.mask !== clipMask { layer?.mask = clipMask }
+    }
+
     /// `lean` tilts the cat around its feet (radians), e.g. while riding a moving window.
     func show(_ frame: SpriteFrame, facingRight: Bool, lean: Double = 0) {
         CATransaction.begin()

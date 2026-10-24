@@ -27,6 +27,7 @@ final class ExtrasController {
         case playOnce(String)              // play an action through to its end
         case tossYarn                      // the show's finale: a yarn ball to chase
         case watchForPlay(seconds: Double) // after a pounce: sit and see if you play back
+        case dash(toX: Double)             // a quick run, going out of sight or coming back
     }
 
     private var steps: [Step] = []
@@ -54,6 +55,7 @@ final class ExtrasController {
     /// pounces until it moves well away.
     private var pouncedAt: CGPoint?
     private var watchStarted = 0.0
+    private var dashSpeed = 0.0
     /// When he last started a game on his own (a chase or pounce you didn't invite).
     private var selfStarts: [TimeInterval] = []
     private var lowAndMovingFor = 0.0
@@ -371,8 +373,44 @@ final class ExtrasController {
         let span = floor.upperBound - floor.lowerBound
         let stop = fromLeft ? floor.lowerBound + span * Double.random(in: 0.15...0.35)
                             : floor.upperBound - span * Double.random(in: 0.15...0.35)
+        pet.edgeClip = pet.currentScreen().frame // Not seen on the next display while it's off the edge.
         run([.place(x: start, y: Double(screen.minY)), .face(right: fromLeft), .walk(toX: stop, run: true),
              .play("idle_sit", seconds: 0.3)])
+    }
+
+    /// Hide: dash off the nearer side of the screen (from a window top, hop down first).
+    /// Returns which side it went, or nil if it can't right now (then it just vanishes).
+    func runOff() -> (left: Bool, Void)? {
+        if isActive {
+            guard pet.surface == .floor else { return nil }
+            abort(dropping: false)
+        }
+        let frame = pet.currentScreen().frame
+        let left = brain.x + catW / 2 < Double(frame.midX)
+        var s: [Step] = []
+        if pet.surface != .floor {
+            guard let down = planGetDown(back: false), case let .leap(_, _, onto)? = down.last, onto == .floor else { return nil }
+            s = down
+        }
+        s += [.dash(toX: left ? Double(frame.minX) - catW - 2 : Double(frame.maxX) + 2)]
+        pet.edgeClip = frame
+        run(s)
+        return (left, ())
+    }
+
+    /// Show again: dash in from that side and leap the last bit.
+    func comeBack(fromLeft: Bool) {
+        abort(dropping: false)
+        let frame = pet.currentScreen().frame
+        let floor = ScreenMath.floorRange(visibleFrame: screen, catWidth: catW)
+        let span = floor.upperBound - floor.lowerBound
+        let stop = fromLeft ? floor.lowerBound + span * Double.random(in: 0.12...0.25)
+                            : floor.upperBound - span * Double.random(in: 0.12...0.25)
+        let start = fromLeft ? Double(frame.minX) - catW - 2 : Double(frame.maxX) + 2
+        let takeOff = fromLeft ? max(stop - catW * 2.2, Double(frame.minX)) : min(stop + catW * 2.2, Double(frame.maxX) - catW)
+        pet.edgeClip = frame
+        run([.place(x: start, y: Double(screen.minY)), .face(right: fromLeft), .dash(toX: takeOff),
+             .pounceAt(x: stop), .play("idle_sit", seconds: 0.4)])
     }
 
     /// Head somewhere on the floor (used to wander off to a side before resting).
@@ -484,6 +522,11 @@ final class ExtrasController {
             engine.request(id, force: true)
         case .tossYarn:
             pet.tossYarn()
+        case let .dash(toX):
+            brain.facingRight = toX > brain.x
+            engine.request("run", force: true)
+            // Quick, but never more than a couple of seconds however far it is.
+            dashSpeed = max(brain.tuning.runSpeed * scale * 1.8, abs(toX - brain.x) / 2.2)
         case .watchForPlay:
             watchStarted = clock
             engine.request("idle_sit", force: true)
@@ -552,6 +595,8 @@ final class ExtrasController {
             return (engine.currentID != id && t > 0.05) || t > 6
         case .tossYarn:
             return true
+        case let .dash(toX):
+            return move(toward: toX, speed: dashSpeed, dt: dt)
         case let .watchForPlay(seconds):
             let mouse = NSEvent.mouseLocation
             let nearby = abs(Double(mouse.x) - (brain.x + catW / 2)) < catW * 4 && Double(mouse.y) < pet.y + catH * 3
@@ -621,6 +666,7 @@ final class ExtrasController {
 
     private func finish() {
         current = nil
+        pet.edgeClip = nil
         emergeY = nil
         involvedWindow = nil
         leap = nil
@@ -641,6 +687,7 @@ final class ExtrasController {
         guard isActive else { return }
         steps = []
         current = nil
+        pet.edgeClip = nil
         emergeY = nil
         involvedWindow = nil
         leap = nil

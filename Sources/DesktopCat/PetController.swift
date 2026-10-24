@@ -127,10 +127,58 @@ final class PetController {
 
     func setPaused(_ paused: Bool) { settings.paused = paused }
 
-    func setHidden(_ hidden: Bool) {
+    /// Set while the cat is running off-screen to hide; the window goes once it's out of sight.
+    private var leaving = false
+    /// The side it last ran off, so it comes back the same way.
+    private var leftOffLeft: Bool?
+    /// While running off or back on: only draw the part of the cat on this display.
+    var edgeClip: NSRect?
+
+    /// Hide runs off the nearer side and Show dashes back in, unless it's asleep, being held or
+    /// Reduce Motion is on (then it simply vanishes or appears). `animated: false` for menu
+    /// commands that put it somewhere specific.
+    func setHidden(_ hidden: Bool, animated: Bool = true) {
+        let canMove = animated && !settings.paused && autoPauseReason == nil && !reduceMotion && !isDragging && fallVelocity == nil
         settings.hidden = hidden
-        if hidden { window.orderOut(nil) } else { window.orderFrontRegardless() }
         care.setPropsVisible(!hidden)
+        if hidden {
+            guard !leaving else { return }
+            if canMove, let side = extras.runOff() {
+                leaving = true
+                leftOffLeft = side.left
+            } else {
+                window.orderOut(nil)
+            }
+            return
+        }
+        if leaving {
+            // Changed your mind on the way out: it stops and stays.
+            leaving = false
+            extras.abort(dropping: false)
+        } else if canMove {
+            fallVelocity = nil
+            tossVelocity = 0
+            surface = .floor
+            ridingFrame = nil
+            engine.sustainLastFrame = false
+            brain.interrupt()
+            let screen = currentScreen()
+            updateFloor(for: screen, width: window.frame.width)
+            extras.comeBack(fromLeft: leftOffLeft ?? (window.frame.midX < screen.frame.midX))
+            placeWindowExactly()
+            render()
+        }
+        window.orderFrontRegardless()
+    }
+
+    /// Out of sight (or interrupted on the way): now actually hide the window.
+    private func finishLeaving() {
+        leaving = false
+        extras.abort(dropping: false)
+        window.orderOut(nil)
+        surface = .floor
+        y = currentScreen().visibleFrame.minY
+        placeWindow() // Back inside the floor, for the next time it's shown.
     }
 
     func switchCat(to id: String) {
@@ -157,7 +205,7 @@ final class PetController {
     /// The Talent Show (from the menu): starts once the cat is on the floor.
     func startTalentShow() {
         if settings.paused { setPaused(false) }
-        if settings.hidden { setHidden(false) }
+        if settings.hidden { setHidden(false, animated: false) }
         if surface != .floor || extras.isActive { extras.abort(dropping: surface != .floor) }
         talentShowPending = true
     }
@@ -209,7 +257,7 @@ final class PetController {
         tossVelocity = 0
         engine.sustainLastFrame = false
         brain.resetToIdle()
-        if settings.hidden { setHidden(false) }
+        if settings.hidden { setHidden(false, animated: false) }
         placeWindow()
     }
 
@@ -219,7 +267,8 @@ final class PetController {
         let now = CACurrentMediaTime()
         let dt = min(now - lastTick, 0.1) // Don't jump ahead after sleep or a stall.
         lastTick = now
-        guard !settings.hidden else { return }
+        if leaving && !extras.isActive { finishLeaving() }
+        guard !settings.hidden || leaving else { return }
         updateMousePassThrough()
         scanIn -= dt
         if scanIn <= 0 { scanWindows() }
@@ -356,6 +405,8 @@ final class PetController {
 
     private func render() {
         window.spriteView.show(engine.frame, facingRight: brain.facingRight, lean: lean)
+        let f = window.frame
+        window.spriteView.clip(to: edgeClip.map { $0.intersection(f).offsetBy(dx: -f.minX, dy: -f.minY) })
     }
 
     // MARK: - Click-through

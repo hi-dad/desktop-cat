@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(pet: pet)
 
         // Testing aid: `open DesktopCat.app --args -demo feed|water|yarn` runs a care action
-        // a moment after launch. Launch arguments aren't saved, so normal launches ignore it.
+        // a moment after launch (or `hide,show`). Launch arguments aren't saved, so normal launches ignore it.
         // Extras can be chained: `-demo climb,hang,down` (turn the extra on too, e.g. `-jumpOnWindows YES`).
         if let demo = UserDefaults.standard.string(forKey: "demo") {
             var queue = demo.split(separator: ",").map(String.init)
@@ -45,6 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "water": pet.fillWater()
                 case "yarn": pet.tossYarn()
                 case "talent": pet.startTalentShow()
+                case "hide": // Runs off the side (once it's sitting).
+                    guard pet.engine.currentID == "idle_sit" else { return }
+                    pet.setHidden(true)
+                case "show": // Dashes back in, once it's fully out of sight.
+                    guard !pet.window.isVisible else { return }
+                    pet.setHidden(false)
                 case "nap": // Lies down and naps for a while (once it's sitting, after landing).
                     guard pet.engine.currentID == "idle_sit" else { return }
                     pet.brain.tuning.explicitSeconds = 30
