@@ -7,6 +7,11 @@
 set -e
 cd "$(dirname "$0")"
 APP=DesktopCat.app
+# Build number = how many commits are in the history, so it goes up with every change and the
+# same code always gets the same number. Sparkle compares it to decide what's an update.
+BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+# Sparkle's public key (it checks updates were signed by the matching private key, kept in GitHub Secrets).
+SPARKLE_PUBLIC_KEY="K7++3NVYizxiK9zTznBpBxkldMue0Uo9tI5lxwODJI4="
 
 # Universal binary: Apple Silicon + Intel Macs.
 swift build -c release --arch arm64 --arch x86_64
@@ -15,6 +20,12 @@ BIN=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/Desktop
 rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp $BIN $APP/Contents/MacOS/DesktopCat
+
+# Sparkle (self-updating). Its XPC services are only for sandboxed apps, so they're left out.
+mkdir -p $APP/Contents/Frameworks
+ditto "$(dirname $BIN)/Sparkle.framework" $APP/Contents/Frameworks/Sparkle.framework
+rm -rf $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices $APP/Contents/Frameworks/Sparkle.framework/XPCServices
+install_name_tool -add_rpath @executable_path/../Frameworks $APP/Contents/MacOS/DesktopCat
 
 # The art and the action list ship inside the app, so it runs fully offline.
 cp -R assets $APP/Contents/Resources/assets
@@ -33,18 +44,27 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>$BUILD</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSHumanReadableCopyright</key><string>Free and offline.</string>
+  <key>NSHumanReadableCopyright</key><string>Free.</string>
+  <key>SUFeedURL</key><string>https://github.com/hi-dad/desktop-cat/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key><true/>
 </dict></plist>
 PLIST
 # GitHub's release builds sign with Developer ID + hardened runtime + timestamp, as Apple's notarization needs.
+# Inside out: Sparkle's helpers, then Sparkle, then the app.
+SPK=$APP/Contents/Frameworks/Sparkle.framework
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp $APP
+  sign=(codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp)
 else
-  codesign --force --sign - $APP
+  sign=(codesign --force --sign -)
 fi
+"${sign[@]}" $SPK/Versions/B/Autoupdate
+"${sign[@]}" $SPK/Versions/B/Updater.app
+"${sign[@]}" $SPK
+"${sign[@]}" $APP
 echo "Built $APP"
 
 if [[ "$1" == "dist" ]]; then

@@ -26,9 +26,9 @@ Everything is in the **cat icon** in your menu bar.
 - **Talent Show** in the menu: half a minute of its best tricks, for showing it off.
 - Two cats to choose from, sizes 1×–6×, Calm / Normal / Lively moods, and extras you can switch off.
 
-Clicks pass straight through everything but the cat. It sleeps during full-screen apps and Low Power Mode. No accounts, no network, no special permissions.
+Clicks pass straight through everything but the cat. It sleeps during full-screen apps and Low Power Mode. No accounts and no special permissions; the only time it goes online is a quick daily check for updates.
 
-**Update:** download again and replace the app. **Remove:** cat icon → **Quit Desktop Cat**, then drag it to the Trash.
+**Updates:** it offers new versions itself (or cat icon → **Check for Updates…**). **Remove:** cat icon → **Quit Desktop Cat**, then drag it to the Trash.
 
 <details><summary>Build it yourself</summary>
 

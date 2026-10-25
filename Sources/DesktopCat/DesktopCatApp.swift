@@ -1,9 +1,12 @@
 import AppKit
+import Sparkle
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pet: PetController?
     private var menuBar: MenuBarController?
+    /// Checks GitHub about once a day for a newer version and offers to install it (Sparkle).
+    private var updater: SPUStandardUpdaterController!
 
     static func main() {
         let app = NSApplication.shared
@@ -15,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         quitOtherCopies()
+        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
         let manifest: Manifest
         do {
@@ -31,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pet = PetController(settings: Settings(), manifest: manifest)
         pet.start()
         self.pet = pet
-        menuBar = MenuBarController(pet: pet)
+        menuBar = MenuBarController(pet: pet, updater: updater.updater)
 
         // Testing aid: `open DesktopCat.app --args -demo feed|water|yarn` runs a care action
         // a moment after launch (or `hide,show`). Launch arguments aren't saved, so normal launches ignore it.

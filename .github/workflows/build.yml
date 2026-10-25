@@ -12,6 +12,8 @@ jobs:
       contents: write # to publish a release when main changes
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history: the build number is the commit count
 
       - name: Show toolchain
         run: |
@@ -66,7 +68,7 @@ jobs:
         run: |
           test -x "DesktopCat.app/Contents/MacOS/DesktopCat"
           plutil -lint "DesktopCat.app/Contents/Info.plist"
-          codesign --verify --verbose "DesktopCat.app"
+          codesign --verify --deep --strict --verbose "DesktopCat.app"
           lipo "DesktopCat.app/Contents/MacOS/DesktopCat" -verify_arch arm64 x86_64
           hdiutil verify dist/DesktopCat.dmg
           for i in 1 2 3 4 5; do xcrun stapler validate dist/DesktopCat.dmg && break; [[ $i == 5 ]] && exit 1; sleep 20; done
@@ -77,13 +79,48 @@ jobs:
           name: DesktopCat
           path: dist/DesktopCat.dmg
 
-      # Every update to main becomes the new download behind the README button.
+      # Every update to main becomes the new download behind the README button, plus appcast.xml:
+      # the note installed copies read (via Sparkle) to find and install it. The DMG is signed with
+      # the Sparkle key so the app only accepts updates that really came from here.
       - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
+          SPARKLE_ED_KEY: ${{ secrets.SPARKLE_ED_KEY }}
         run: |
-          version="$(plutil -extract CFBundleShortVersionString raw "DesktopCat.app/Contents/Info.plist")"
-          gh release create "build-$GITHUB_RUN_NUMBER" dist/DesktopCat.dmg \
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir "$RUNNER_TEMP/sparkle" && tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" bin/sign_update
+          enclosure="$(echo "$SPARKLE_ED_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - dist/DesktopCat.dmg)"
+          plist=DesktopCat.app/Contents/Info.plist
+          tag="build-$GITHUB_RUN_NUMBER"
+          ENCLOSURE="$enclosure" TAG="$tag" \
+          VERSION="$(plutil -extract CFBundleShortVersionString raw $plist)" BUILD="$(plutil -extract CFBundleVersion raw $plist)" \
+          NOTES="$(git log -1 --format=%B)" python3 - <<'PY'
+          import email.utils, os
+          from xml.sax.saxutils import escape
+          e = os.environ
+          url = f"https://github.com/hi-dad/desktop-cat/releases/download/{e['TAG']}/DesktopCat.dmg"
+          paras = [" ".join(p.split()) for p in e["NOTES"].split("\n\n")]  # the commit message, unwrapped
+          notes = "".join(f"<p>{escape(p)}</p>" for p in paras if p and not p.startswith("Co-Authored-By"))
+          open("dist/appcast.xml", "w").write(f'''<?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Desktop Cat</title>
+              <item>
+                <title>Desktop Cat {e['VERSION']} (build {e['BUILD']})</title>
+                <pubDate>{email.utils.formatdate()}</pubDate>
+                <sparkle:version>{e['BUILD']}</sparkle:version>
+                <sparkle:shortVersionString>{e['VERSION']}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <description>{escape(notes)}</description>
+                <enclosure url="{url}" {e['ENCLOSURE']} type="application/octet-stream"/>
+              </item>
+            </channel>
+          </rss>
+          ''')
+          PY
+          cat dist/appcast.xml
+          gh release create "$tag" dist/DesktopCat.dmg dist/appcast.xml \
             --target "$GITHUB_SHA" --latest \
-            --title "Desktop Cat $version (build $GITHUB_RUN_NUMBER)" --generate-notes
+            --title "Desktop Cat $(plutil -extract CFBundleShortVersionString raw $plist) (build $GITHUB_RUN_NUMBER)" --generate-notes

@@ -1,18 +1,21 @@
 import AppKit
 import ServiceManagement
+import Sparkle
 
 /// The always-available menu-bar icon. The menu is rebuilt each time it opens,
 /// so checkmarks always match the current settings.
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let pet: PetController
+    private let updater: SPUUpdater
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
 
     /// Friendlier names for the menu (manifest names stay the source of truth for IDs).
     private let catDescriptions = ["fluffy_b": "tan & white", "orange_c": "orange"]
 
-    init(pet: PetController) {
+    init(pet: PetController, updater: SPUUpdater) {
         self.pet = pet
+        self.updater = updater
         super.init()
         statusItem.button?.image = MenuBarIcon.image
         menu.delegate = self
@@ -69,6 +72,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let login = item("Launch at Login", #selector(toggleLaunchAtLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
+        let update = item("Check for Updates…", #selector(checkForUpdates))
+        update.isEnabled = updater.canCheckForUpdates
+        menu.addItem(update)
         menu.addItem(.separator())
         menu.addItem(item("Quit Desktop Cat", #selector(quit)))
     }
@@ -166,6 +172,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func chooseScale(_ sender: NSMenuItem) { pet.setScale(sender.tag) }
     @objc private func talentShow() { pet.startTalentShow() }
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
 
     @objc private func toggleLaunchAtLogin() {
         let service = SMAppService.mainApp
