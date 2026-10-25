@@ -12,7 +12,9 @@ let package = Package(
     ],
     targets: [
         .executableTarget(name: "DesktopCat", dependencies: [.product(name: "Sparkle", package: "Sparkle")],
-                          path: "Sources/DesktopCat"),
+                          path: "Sources/DesktopCat",
+                          // Run straight from .build too (Sparkle.framework sits next to the binary there).
+                          linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path"])]),
         .testTarget(name: "DesktopCatTests", dependencies: ["DesktopCat"], path: "Tests/DesktopCatTests"),
     ],
     swiftLanguageModes: [.v5]

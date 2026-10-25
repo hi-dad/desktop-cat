@@ -1,9 +1,20 @@
 name: Build
 
+# Code changes are built and checked on every push. Changes to only the README, pictures or docs
+# skip the build. A release (the Download link, and the update installed copies are offered) only
+# goes out when you ask: Actions → Build → Run workflow with "Publish a release" ticked, or
+# `gh workflow run build.yml -f release=true`.
 on:
   push:
+    paths-ignore: ['**.md', 'LICENSE', 'images/**', 'docs/**', 'previews/**', 'tools/ad/**']
   pull_request:
+    paths-ignore: ['**.md', 'LICENSE', 'images/**', 'docs/**', 'previews/**', 'tools/ad/**']
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a release (users get offered the update)
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -83,7 +94,7 @@ jobs:
       # the note installed copies read (via Sparkle) to find and install it. The DMG is signed with
       # the Sparkle key so the app only accepts updates that really came from here.
       - name: Publish release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           SPARKLE_ED_KEY: ${{ secrets.SPARKLE_ED_KEY }}
